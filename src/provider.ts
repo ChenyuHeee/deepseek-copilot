@@ -247,6 +247,10 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 				if (typeof mo.presence_penalty === "number") {
 					(requestBody as Record<string, unknown>).presence_penalty = mo.presence_penalty;
 				}
+				// Honor reasoning_effort from Copilot UI (low / medium / high)
+				if (typeof mo.reasoning_effort === "string" && ["low", "medium", "high"].includes(mo.reasoning_effort)) {
+					(requestBody as Record<string, unknown>).reasoning_effort = mo.reasoning_effort;
+				}
 			}
 
 			if (toolConfig.tools) {
