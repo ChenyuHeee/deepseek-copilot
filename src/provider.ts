@@ -9,13 +9,35 @@ import {
 	Progress,
 } from "vscode";
 
-import type { HFModelItem, HFModelsResponse } from "./types";
+import type { HFModelItem } from "./types";
 
 import { convertTools, convertMessages, tryParseJSONObject, validateRequest } from "./utils";
 
-const BASE_URL = "https://router.huggingface.co/v1";
-const DEFAULT_MAX_OUTPUT_TOKENS = 16000;
+const BASE_URL = "https://api.deepseek.com/v1";
+const DEFAULT_MAX_OUTPUT_TOKENS = 8000;
 const DEFAULT_CONTEXT_LENGTH = 128000;
+const DEEPSEEK_SECRET_KEY = "deepseek.apiKey";
+
+/** The single DeepSeek model exposed to VS Code. */
+const DEEPSEEK_V4_PRO_MODEL: import("./types").HFModelItem = {
+	id: "deepseek-v4-pro",
+	object: "model",
+	created: 0,
+	owned_by: "deepseek-ai",
+	providers: [
+		{
+			provider: "deepseek",
+			status: "live",
+			supports_tools: true,
+			supports_structured_output: false,
+			context_length: DEFAULT_CONTEXT_LENGTH,
+		},
+	],
+	architecture: {
+		input_modalities: ["text"],
+		output_modalities: ["text"],
+	},
+};
 
 /**
  * VS Code Chat provider backed by Hugging Face Inference Providers.
@@ -95,7 +117,7 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 			return [];
 		}
 
-		const { models } = await this.fetchModels(apiKey);
+		const models = [DEEPSEEK_V4_PRO_MODEL];
 
 		const infos: LanguageModelChatInformation[] = models.flatMap((m) => {
 			const providers = m?.providers ?? [];
@@ -200,39 +222,7 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 	 * Fetch the list of models and supplementary metadata from Hugging Face.
 	 * @param apiKey The HF API key used to authenticate.
 	 */
-	private async fetchModels(
-		apiKey: string
-	): Promise<{ models: HFModelItem[] }> {
-			const modelsList = (async () => {
-				const resp = await fetch(`${BASE_URL}/models`, {
-					method: "GET",
-					headers: { Authorization: `Bearer ${apiKey}`, "User-Agent": this.userAgent },
-				});
-				if (!resp.ok) {
-					let text = "";
-					try {
-						text = await resp.text();
-					} catch (error) {
-						console.error("[Hugging Face Model Provider] Failed to read response text", error);
-					}
-					const err = new Error(
-						`Failed to fetch Hugging Face models: ${resp.status} ${resp.statusText}${text ? `\n${text}` : ""}`
-					);
-					console.error("[Hugging Face Model Provider] Failed to fetch Hugging Face models", err);
-					throw err;
-				}
-				const parsed = (await resp.json()) as HFModelsResponse;
-				return parsed.data ?? [];
-			})();
 
-			try {
-				const models = await modelsList;
-				return { models };
-			} catch (err) {
-				console.error("[Hugging Face Model Provider] Failed to fetch Hugging Face models", err);
-				throw err;
-			}
-		}
 
 	/**
 	 * Returns the response for a chat request, passing the results to the progress callback.
@@ -339,9 +329,9 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 
 			if (!response.ok) {
 				const errorText = await response.text();
-				console.error("[Hugging Face Model Provider] HF API error response", errorText);
+				console.error("[DeepSeek Model Provider] API error response", errorText);
 				throw new Error(
-					`Hugging Face API error: ${response.status} ${response.statusText}${errorText ? `\n${errorText}` : ""}`
+					`DeepSeek API error: ${response.status} ${response.statusText}${errorText ? `\n${errorText}` : ""}`
 				);
 			}
 
@@ -389,17 +379,17 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 	 * @param silent If true, do not prompt the user.
 	 */
 	private async ensureApiKey(silent: boolean): Promise<string | undefined> {
-		let apiKey = await this.secrets.get("huggingface.apiKey");
+		let apiKey = await this.secrets.get(DEEPSEEK_SECRET_KEY);
 		if (!apiKey && !silent) {
 			const entered = await vscode.window.showInputBox({
-				title: "Hugging Face API Key",
-				prompt: "Enter your Hugging Face API key",
+				title: "DeepSeek API Key",
+				prompt: "Enter your DeepSeek API key",
 				ignoreFocusOut: true,
 				password: true,
 			});
 			if (entered && entered.trim()) {
 				apiKey = entered.trim();
-				await this.secrets.store("huggingface.apiKey", apiKey);
+				await this.secrets.store(DEEPSEEK_SECRET_KEY, apiKey);
 			}
 		}
 		return apiKey;

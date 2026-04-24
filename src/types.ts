@@ -55,23 +55,6 @@ export interface HFModelItem {
 }
 
 /**
- * Supplemental model info from the Hugging Face hub API.
- */
-// Deprecated: extra model info was previously fetched from the hub API
-export interface HFExtraModelInfo {
-    id: string;
-    pipeline_tag?: string;
-}
-
-/**
- * Response envelope for the router models listing.
- */
-export interface HFModelsResponse {
-	object: string;
-	data: HFModelItem[];
-}
-
-/**
  * Buffer used to accumulate streamed tool call parts until arguments are valid JSON.
  */
 export interface ToolCallBuffer {

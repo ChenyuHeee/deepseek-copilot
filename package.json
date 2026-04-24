@@ -1,12 +1,12 @@
 {
-	"name": "huggingface-vscode-chat",
-	"publisher": "HuggingFace",
-	"displayName": "Hugging Face Provider for GitHub Copilot Chat",
-	"description": "An extension that integrates Hugging Face Inference Providers into GitHub Copilot Chat",
+	"name": "deepseek-v4-pro-copilot",
+	"publisher": "ChenyuHeee",
+	"displayName": "DeepSeek V4 Pro for GitHub Copilot Chat",
+	"description": "An extension that integrates DeepSeek V4 Pro into GitHub Copilot Chat",
 	"icon": "assets/logo.png",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/huggingface/huggingface-vscode-chat"
+		"url": "https://github.com/ChenyuHeee/deepseek-v4-pro-copilot"
 	},
 	"version": "0.1.0",
 	"engines": {
@@ -20,64 +20,36 @@
 		"color": "#100f11",
 		"theme": "dark"
 	},
-	"badges": [
-		{
-		"url": "https://img.shields.io/github/stars/huggingface/huggingface-vscode-chat?style=social",
-		"description": "Star huggingface-vscode-chat on Github",
-		"href": "https://github.com/huggingface/huggingface-vscode-chat"
-		},
-		{
-		"url": "https://img.shields.io/twitter/follow/huggingface?style=social",
-		"description": "Follow Hugging Face on Twitter",
-		"href": "https://x.com/huggingface"
-		}
-	],
-	"homepage": "https://huggingface.co/docs/inference-providers/en/index",
 	"bugs": {
-		"url": "https://github.com/huggingface/huggingface-vscode-chat/issues"
+		"url": "https://github.com/ChenyuHeee/deepseek-v4-pro-copilot/issues"
 	},
 	"license": "MIT",
 	"contributes": {
 		"languageModelChatProviders": [
 			{
 				"vendor": "huggingface",
-				"displayName": "Hugging Face",
+				"displayName": "DeepSeek V4 Pro",
 				"managementCommand": "huggingface.manage"
 			}
 		],
 		"commands": [
 			{
 				"command": "huggingface.manage",
-				"title": "Manage Hugging Face Provider"
+				"title": "Manage DeepSeek V4 Pro Provider"
 			}
 		]
 	},
 	"main": "./out/extension.js",
 	"scripts": {
 		"vscode:prepublish": "npm run compile",
-		"download-api": "dts dev",
-		"postdownload-api": "dts main",
-		"postinstall": "npm run download-api",
 		"compile": "tsc -p ./",
-		"lint": "eslint",
-		"format": "prettier --write .",
-		"watch": "tsc -watch -p ./",
-		"test": "pnpm run compile && vscode-test"
+		"watch": "tsc -watch -p ./"
 	},
 	"dependencies": {},
 	"devDependencies": {
-		"@eslint/js": "^9.13.0",
-		"@stylistic/eslint-plugin": "^2.9.0",
 		"@types/node": "^22",
-		"@types/mocha": "^10.0.6",
 		"@vscode/dts": "^0.4.1",
 		"@types/vscode": "^1.103.0",
-		"@vscode/test-cli": "^0.0.11",
-		"@vscode/test-electron": "^2.5.2",
-		"eslint": "^9.13.0",
-		"prettier": "^3.1.0",
-		"typescript": "^5.9.2",
-		"typescript-eslint": "^8.39.0"
-	},
-	"packageManager": "pnpm@8.15.4+sha512.0bd3a9be9eb0e9a692676deec00a303ba218ba279d99241475616b398dbaeedd11146f92c2843458f557b1d127e09d4c171e105bdcd6b61002b39685a8016b9e"
+		"typescript": "^5.9.2"
+	}
 }
