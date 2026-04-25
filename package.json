@@ -1,14 +1,14 @@
 {
-	"name": "deepseek-v4-pro-copilot",
+	"name": "deepseek-copilot",
 	"publisher": "ChenyuHeee",
-	"displayName": "DeepSeek V4 Pro for GitHub Copilot Chat",
-	"description": "An extension that integrates DeepSeek V4 Pro into GitHub Copilot Chat",
+	"displayName": "DeepSeek for GitHub Copilot Chat",
+	"description": "Integrates DeepSeek V4 Flash and V4 Pro into GitHub Copilot Chat",
 	"icon": "assets/logo.png",
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/ChenyuHeee/deepseek-v4-pro-copilot"
 	},
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"engines": {
 		"vscode": "^1.104.0"
 	},

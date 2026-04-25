@@ -1,0 +1,43 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Compile
+        run: npm run compile
+
+      - name: Package extension
+        run: npx @vscode/vsce package --no-dependencies -o deepseek-copilot.vsix
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: deepseek-copilot.vsix
+          generate_release_notes: true
+          body: |
+            ## Installation
+
+            1. Download `deepseek-copilot.vsix` below
+            2. In VS Code: `Extensions` panel → `...` menu → `Install from VSIX...`
+            3. Or run: `code --install-extension deepseek-copilot.vsix`
+            4. Run command `Manage DeepSeek Provider` to enter your DeepSeek API key

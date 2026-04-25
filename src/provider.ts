@@ -19,26 +19,49 @@ const DEFAULT_CONTEXT_LENGTH = 1048576; // 1M context window
 const DEEPSEEK_SECRET_KEY = "deepseek.apiKey";
 const REASONING_EFFORT = "medium"; // "low" | "medium" | "high"
 
-/** The single DeepSeek model exposed to VS Code. */
-const DEEPSEEK_V4_PRO_MODEL: import("./types").HFModelItem = {
-	id: "deepseek-v4-pro",
-	object: "model",
-	created: 0,
-	owned_by: "deepseek-ai",
-	providers: [
-		{
-			provider: "deepseek",
-			status: "live",
-			supports_tools: true,
-			supports_structured_output: false,
-			context_length: DEFAULT_CONTEXT_LENGTH,
+const FLASH_CONTEXT_LENGTH = 65536; // 64K context window for flash
+
+/** DeepSeek models exposed to VS Code. */
+const DEEPSEEK_MODELS: import("./types").HFModelItem[] = [
+	{
+		id: "deepseek-v4-flash",
+		object: "model",
+		created: 0,
+		owned_by: "deepseek-ai",
+		providers: [
+			{
+				provider: "deepseek",
+				status: "live",
+				supports_tools: true,
+				supports_structured_output: false,
+				context_length: FLASH_CONTEXT_LENGTH,
+			},
+		],
+		architecture: {
+			input_modalities: ["text"],
+			output_modalities: ["text"],
 		},
-	],
-	architecture: {
-		input_modalities: ["text"],
-		output_modalities: ["text"],
 	},
-};
+	{
+		id: "deepseek-v4-pro",
+		object: "model",
+		created: 0,
+		owned_by: "deepseek-ai",
+		providers: [
+			{
+				provider: "deepseek",
+				status: "live",
+				supports_tools: true,
+				supports_structured_output: false,
+				context_length: DEFAULT_CONTEXT_LENGTH,
+			},
+		],
+		architecture: {
+			input_modalities: ["text"],
+			output_modalities: ["text"],
+		},
+	},
+];
 
 /**
  * VS Code Chat provider backed by Hugging Face Inference Providers.
@@ -118,16 +141,20 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 			return [];
 		}
 
-		const m = DEEPSEEK_V4_PRO_MODEL;
-		const contextLen = m.providers[0]?.context_length ?? DEFAULT_CONTEXT_LENGTH;
 		const maxOutput = DEFAULT_MAX_OUTPUT_TOKENS;
-		const maxInput = Math.max(1, contextLen - maxOutput);
 
-		const infos: LanguageModelChatInformation[] = [
-			{
+		const MODEL_NAMES: Record<string, string> = {
+			"deepseek-v4-flash": "DeepSeek V4 Flash",
+			"deepseek-v4-pro": "DeepSeek V4 Pro",
+		};
+
+		const infos: LanguageModelChatInformation[] = DEEPSEEK_MODELS.map((m) => {
+			const contextLen = m.providers[0]?.context_length ?? DEFAULT_CONTEXT_LENGTH;
+			const maxInput = Math.max(1, contextLen - maxOutput);
+			return {
 				id: m.id,
-				name: "DeepSeek V4 Pro",
-				tooltip: "DeepSeek V4 Pro via DeepSeek API",
+				name: MODEL_NAMES[m.id] ?? m.id,
+				tooltip: `${MODEL_NAMES[m.id] ?? m.id} via DeepSeek API`,
 				family: "huggingface",
 				version: "1.0.0",
 				maxInputTokens: maxInput,
@@ -136,8 +163,8 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 					toolCalling: true,
 					imageInput: false,
 				},
-			} satisfies LanguageModelChatInformation,
-		];
+			} satisfies LanguageModelChatInformation;
+		});
 
 		this._chatEndpoints = infos.map((info) => ({
 			model: info.id,
@@ -225,14 +252,15 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
                 throw new Error("Message exceeds token limit.");
             }
 
+            // Only Pro supports thinking mode
+            const supportsThinking = model.id === "deepseek-v4-pro";
             requestBody = {
                 model: model.id,
                 messages: openaiMessages,
                 stream: true,
                 max_tokens: Math.min(options.modelOptions?.max_tokens || 4096, model.maxOutputTokens),
                 temperature: options.modelOptions?.temperature ?? 0.7,
-                thinking: { type: "enabled" },
-                reasoning_effort: REASONING_EFFORT,
+                ...(supportsThinking ? { thinking: { type: "enabled" }, reasoning_effort: REASONING_EFFORT } : {}),
             };
 
 			// Allow-list model options
