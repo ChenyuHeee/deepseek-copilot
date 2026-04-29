@@ -12,6 +12,7 @@ import {
 import type { HFModelItem } from "./types";
 
 import { convertTools, convertMessages, tryParseJSONObject, validateRequest } from "./utils";
+import { ReasoningCache, fingerprintAssistantTurn, type CachedTurn } from "./reasoning_cache";
 
 const BASE_URL = "https://api.deepseek.com/v1";
 const DEFAULT_MAX_OUTPUT_TOKENS = 8000;
@@ -20,6 +21,7 @@ const DEEPSEEK_SECRET_KEY = "deepseek.apiKey";
 const REASONING_EFFORT = "medium"; // "low" | "medium" | "high"
 
 const FLASH_CONTEXT_LENGTH = DEFAULT_CONTEXT_LENGTH; // 1M context window for flash
+const REASONING_CACHE_STATE_KEY = "deepseek.reasoningCache";
 
 /** DeepSeek models exposed to VS Code. */
 const DEEPSEEK_MODELS: import("./types").HFModelItem[] = [
@@ -83,6 +85,15 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 	/** Track if we emitted the begin-tool-calls whitespace flush. */
 	private _emittedBeginToolCallsHint = false;
 
+	// ── Reasoning cache ──────────────────────────────────────────────────────
+	private readonly _reasoningCache = new ReasoningCache(512);
+	private _persistTimer: ReturnType<typeof setTimeout> | undefined;
+
+	// Per-turn state for reasoning capture (reset at start of each response)
+	private _currentTurnReasoning = "";
+	private _currentTurnEmittedText = "";
+	private _currentTurnEmittedToolCalls: Array<{ id: string; name: string }> = [];
+
 	// Lightweight tokenizer state for tool calls embedded in text
 	private _textToolParserBuffer = "";
 	private _textToolActive:
@@ -99,8 +110,33 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 	/**
 	 * Create a provider using the given secret storage for the API key.
 	 * @param secrets VS Code secret storage.
+	 * @param userAgent User-Agent header value.
+	 * @param globalState Extension global state for cache persistence.
 	 */
-	constructor(private readonly secrets: vscode.SecretStorage, private readonly userAgent: string) {}
+	constructor(
+		private readonly secrets: vscode.SecretStorage,
+		private readonly userAgent: string,
+		private readonly globalState: vscode.Memento,
+	) {
+		// Restore persisted reasoning cache so multi-turn conversations survive
+		// VS Code restarts without hitting DeepSeek 400 errors.
+		const saved = this.globalState.get<CachedTurn[]>(REASONING_CACHE_STATE_KEY);
+		if (Array.isArray(saved) && saved.length > 0) {
+			this._reasoningCache.restore(saved);
+		}
+
+		// Debounce persistence: collapse a flurry of writes during one streaming
+		// turn into a single globalState update.
+		this._reasoningCache.setOnChange(() => {
+			if (this._persistTimer) {
+				clearTimeout(this._persistTimer);
+			}
+			this._persistTimer = setTimeout(() => {
+				void this.globalState.update(REASONING_CACHE_STATE_KEY, this._reasoningCache.serialize());
+				this._persistTimer = undefined;
+			}, 200);
+		});
+	}
 
 	/** Roughly estimate tokens for VS Code chat messages (text only) */
 	private estimateMessagesTokens(msgs: readonly vscode.LanguageModelChatMessage[]): number {
@@ -213,6 +249,9 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
         this._textToolActive = undefined;
         this._emittedTextToolCallKeys.clear();
         this._emittedTextToolCallIds.clear();
+		this._currentTurnReasoning = "";
+		this._currentTurnEmittedText = "";
+		this._currentTurnEmittedToolCalls = [];
 
 
 		let requestBody: Record<string, unknown> | undefined;
@@ -220,6 +259,11 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 			report: (part) => {
 				try {
 					progress.report(part);
+					if (part instanceof vscode.LanguageModelTextPart) {
+						this._currentTurnEmittedText += part.value;
+					} else if (part instanceof vscode.LanguageModelToolCallPart) {
+						this._currentTurnEmittedToolCalls.push({ id: part.callId, name: part.name });
+					}
 				} catch (e) {
 					console.error("[Hugging Face Model Provider] Progress.report failed", {
 						modelId: model.id,
@@ -238,6 +282,13 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 
 			validateRequest(messages);
 
+			// Re-inject cached reasoning_content for Pro (thinking mode) so
+			// DeepSeek does not 400 on multi-turn conversations.
+			const supportsThinking = model.id === "deepseek-v4-pro";
+			if (supportsThinking) {
+				this.attachReasoningToHistory(openaiMessages);
+			}
+
             const toolConfig = convertTools(options);
 
         if (options.tools && options.tools.length > 128) {
@@ -252,8 +303,6 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
                 throw new Error("Message exceeds token limit.");
             }
 
-            // Only Pro supports thinking mode
-            const supportsThinking = model.id === "deepseek-v4-pro";
             requestBody = {
                 model: model.id,
                 messages: openaiMessages,
@@ -309,6 +358,8 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 				throw new Error("No response body from Hugging Face API");
 			}
 			await this.processStreamingResponse(response.body, trackingProgress, token);
+			// Persist reasoning from this turn into the cache for future turns.
+			this.persistReasoningForTurn();
 		} catch (err) {
 			console.error("[Hugging Face Model Provider] Chat request failed", {
 				modelId: model.id,
@@ -437,6 +488,24 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
         if (!choice) { return false; }
 
 		const deltaObj = choice.delta as Record<string, unknown> | undefined;
+
+		// Capture DeepSeek reasoning_content (chain-of-thought) for cache and
+		// surface it to VS Code as a ThinkingPart when the API is available.
+		const reasoningChunk = deltaObj?.reasoning_content;
+		if (typeof reasoningChunk === "string" && reasoningChunk.length > 0) {
+			this._currentTurnReasoning += reasoningChunk;
+			try {
+				const ThinkingCtor = (vscode as unknown as Record<string, unknown>)["LanguageModelThinkingPart"] as
+					| (new (text: string) => unknown)
+					| undefined;
+				if (ThinkingCtor) {
+					progress.report(new ThinkingCtor(reasoningChunk) as unknown as vscode.LanguageModelResponsePart);
+					emitted = true;
+				}
+			} catch {
+				// ThinkingPart not available in this VS Code version — silently skip
+			}
+		}
 
 		// report thinking progress if backend provides it and host supports it
 		try {
@@ -721,6 +790,7 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
             this._emittedTextToolCallKeys.add(`${buf.name}:${canonical}`);
         } catch { /* ignore */ }
         progress.report(new vscode.LanguageModelToolCallPart(id, buf.name, parameters));
+        this._currentTurnEmittedToolCalls.push({ id, name: buf.name });
         this._toolCallBuffers.delete(index);
         this._completedToolCallIndices.add(index);
     }
@@ -754,10 +824,66 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
                 this._emittedTextToolCallKeys.add(`${name}:${canonical}`);
             } catch { /* ignore */ }
             progress.report(new vscode.LanguageModelToolCallPart(id, name, parsed.value));
+            this._currentTurnEmittedToolCalls.push({ id, name });
             this._toolCallBuffers.delete(idx);
             this._completedToolCallIndices.add(idx);
         }
     }
+
+	/**
+	 * Persist the reasoning accumulated during this turn into the LRU cache,
+	 * keyed by a fingerprint of the emitted content / tool calls.
+	 * Called after processStreamingResponse completes successfully.
+	 */
+	private persistReasoningForTurn(): void {
+		if (!this._currentTurnReasoning) {
+			return;
+		}
+		const fp = fingerprintAssistantTurn({
+			text: this._currentTurnEmittedText,
+			toolCalls: this._currentTurnEmittedToolCalls,
+		});
+		if (!fp) {
+			// No anchor — can't key this turn into the cache.
+			this._currentTurnReasoning = "";
+			return;
+		}
+		const byteLen = Buffer.byteLength(this._currentTurnReasoning, "utf8");
+		if (byteLen > ReasoningCache.ENTRY_SIZE_WARN_BYTES) {
+			console.warn("[DeepSeek] reasoning cache entry is large", { byteLen, fp });
+		}
+		this._reasoningCache.set(fp, this._currentTurnReasoning);
+		this._currentTurnReasoning = "";
+	}
+
+	/**
+	 * Walk the converted history and re-attach cached reasoning_content to
+	 * prior assistant turns.  DeepSeek requires reasoning_content on every
+	 * assistant message in a thinking-mode request; VS Code does not preserve
+	 * it, so we restore it from our local cache.
+	 *
+	 * Cache misses fall back to an empty string so the request still goes
+	 * through (DeepSeek requires the field to be present, even if empty).
+	 * Mutates messages in place.
+	 */
+	private attachReasoningToHistory(messages: import("./types").OpenAIChatMessage[]): void {
+		for (const msg of messages) {
+			if (msg.role !== "assistant") {
+				continue;
+			}
+			// Already has reasoning_content — skip (shouldn't happen, but be safe)
+			if (msg.reasoning_content !== undefined) {
+				continue;
+			}
+			const fp = fingerprintAssistantTurn({
+				text: msg.content ?? "",
+				toolCalls: msg.tool_calls?.map((tc) => ({ id: tc.id, name: tc.function.name })),
+			});
+			const cached = fp ? this._reasoningCache.get(fp) : undefined;
+			// Inject real value from cache, or fall back to "" to avoid DeepSeek 400
+			msg.reasoning_content = cached ?? "";
+		}
+	}
 
 	/** Strip provider control tokens like <|tool_calls_section_begin|> and <|tool_call_begin|> from streamed text. */
 	private stripControlTokens(text: string): string {

@@ -9,7 +9,7 @@ export function activate(context: vscode.ExtensionContext) {
 	// Keep UA minimal: only extension version and VS Code version
 	const ua = `huggingface-vscode-chat/${extVersion} VSCode/${vscodeVersion}`;
 
-	const provider = new HuggingFaceChatModelProvider(context.secrets, ua);
+	const provider = new HuggingFaceChatModelProvider(context.secrets, ua, context.globalState);
 	// Register the Hugging Face provider under the vendor id used in package.json
 	vscode.lm.registerLanguageModelChatProvider("huggingface", provider);
 
