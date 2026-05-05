@@ -36,6 +36,11 @@
 			{
 				"command": "huggingface.manage",
 				"title": "Manage DeepSeek V4 Pro Provider"
+			},
+			{
+				"command": "huggingface.refreshBalance",
+				"title": "Refresh DeepSeek Balance",
+				"icon": "$(refresh)"
 			}
 		]
 	},
