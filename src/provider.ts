@@ -282,10 +282,12 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 
 			validateRequest(messages);
 
-			// Re-inject cached reasoning_content for Pro (thinking mode) so
-			// DeepSeek does not 400 on multi-turn conversations.
-			const supportsThinking = model.id === "deepseek-v4-pro";
-			if (supportsThinking) {
+			// Flash has thinking ON by default; Pro requires explicit enabling.
+			// Both models return reasoning_content and require it to be re-injected
+			// in subsequent turns — so we split the two concerns.
+			const hasReasoningContent = model.id === "deepseek-v4-pro" || model.id === "deepseek-v4-flash";
+			const enableThinkingParam = model.id === "deepseek-v4-pro";
+			if (hasReasoningContent) {
 				this.attachReasoningToHistory(openaiMessages);
 			}
 
@@ -309,7 +311,7 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
                 stream: true,
                 max_tokens: Math.min(options.modelOptions?.max_tokens || 4096, model.maxOutputTokens),
                 temperature: options.modelOptions?.temperature ?? 0.7,
-                ...(supportsThinking ? { thinking: { type: "enabled" }, reasoning_effort: REASONING_EFFORT } : {}),
+                ...(enableThinkingParam ? { thinking: { type: "enabled" }, reasoning_effort: REASONING_EFFORT } : {}),
             };
 
 			// Allow-list model options
