@@ -363,20 +363,22 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 				throw new Error("No response body from Hugging Face API");
 			}
 			await this.processStreamingResponse(response.body, trackingProgress, token);
-			// Persist reasoning from this turn into the cache for future turns.
-			this.persistReasoningForTurn();
 
 			// ── Usage tracking for status bar ──
+			// Must be called BEFORE persistReasoningForTurn() which clears _currentTurnReasoning.
 			if (this.onUsage) {
 				// Estimate output tokens from the emitted text + reasoning + tool calls
 				let outputTokens = Math.ceil(this._currentTurnEmittedText.length / 4)
 					+ Math.ceil(this._currentTurnReasoning.length / 4);
-				for (const tc of this._currentTurnEmittedToolCalls) {
+				for (const _tc of this._currentTurnEmittedToolCalls) {
 					// Rough estimate: each tool call ~ 50 tokens overhead
 					outputTokens += 50;
 				}
 				this.onUsage(inputTokenCount + toolTokenCount, outputTokens);
 			}
+
+			// Persist reasoning from this turn into the cache for future turns.
+			this.persistReasoningForTurn();
 		} catch (err) {
 			console.error("[Hugging Face Model Provider] Chat request failed", {
 				modelId: model.id,
